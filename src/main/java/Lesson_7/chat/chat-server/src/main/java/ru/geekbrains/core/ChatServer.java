@@ -6,15 +6,16 @@ import ru.geekbrains.net.ServerSocketThread;
 import ru.geekbrains.net.ServerSocketThreadListener;
 
 import java.net.Socket;
-import java.util.Vector;
+import java.util.HashMap;
+import java.util.Map;
 
 public class ChatServer implements ServerSocketThreadListener, MessageSocketThreadListener {
 
     private ServerSocketThread serverSocketThread;
-    private ClientSessionThread clientSession;
     private ChatServerListener listener;
     private AuthController authController;
-    private Vector<ClientSessionThread> clients = new Vector<>();
+    private HashMap<Socket, ClientSessionThread> clientSessions; //Hashtable не стал использовать, т. к. сервер 1 всегда.
+    private static final int MAX_CLIENT_CONNECTIONS = 100;
 
     public ChatServer(ChatServerListener listener) {
         this.listener = listener;
@@ -28,6 +29,7 @@ public class ChatServer implements ServerSocketThreadListener, MessageSocketThre
         serverSocketThread.start();
         authController = new AuthController();
         authController.init();
+        clientSessions = new HashMap<>(MAX_CLIENT_CONNECTIONS);
     }
 
     public void stop() {
@@ -44,7 +46,9 @@ public class ChatServer implements ServerSocketThreadListener, MessageSocketThre
 
     @Override
     public void onSocketAccepted(Socket socket) {
-        this.clientSession = new ClientSessionThread(this, "ClientSessionThread", socket);
+        if (!clientSessions.containsKey(socket)) {
+            clientSessions.put(socket, new ClientSessionThread(this, "ClientSessionThread", socket));
+        }
     }
 
     @Override
@@ -68,32 +72,42 @@ public class ChatServer implements ServerSocketThreadListener, MessageSocketThre
     }
 
     @Override
-    public void onMessageReceived(String msg) {
-        if (clientSession.isAuthorized()) {
-            processAuthorizedUserMessage(msg);
-        } else {
-            processUnauthorizedUserMessage(msg);
+    public void onMessageReceived(Socket socket, String msg) {
+        ClientSessionThread clientSession = clientSessions.get(socket);
+        if (clientSession instanceof ClientSessionThread) {
+            if (clientSession.isAuthorized()) {
+                processAuthorizedUserMessage(clientSession, msg);
+            } else {
+                processUnauthorizedUserMessage(clientSession, msg);
+            }
+        }
+    }
+
+    private void processAuthorizedUserMessage(ClientSessionThread currentSession, String msg) {
+        logMessage(msg);
+        Map<String, Object> decodedMessage = MessageLibrary.decodeMessage(msg);
+        if (decodedMessage == null) {
+            return;
+        }
+        String messageType = (String) (decodedMessage.get("type"));
+        String message = (String) (decodedMessage.get("message"));
+        if (messageType.equals(MessageLibrary.COMMON_MESSAGE_TYPE)) {
+            if (message.startsWith("/all")) {
+                clientSessions.forEach((key, clientSession) -> {
+                    clientSession.sendMessage(msg);
+                });
+            } else currentSession.sendMessage(msg);
         }
 
-
     }
 
-    private void processAuthorizedUserMessage(String msg) {
-        logMessage(msg);
-        clientSession.sendMessage("echo: " + msg);
-    }
-
-    private void processUnauthorizedUserMessage(String msg) {
-        String[] arr = msg.split(MessageLibrary.DELIMITER);
-        if (arr.length < 4 ||
-                !arr[0].equals(MessageLibrary.AUTH_METHOD) ||
-                !arr[1].equals(MessageLibrary.AUTH_REQUEST)) {
+    private void processUnauthorizedUserMessage(ClientSessionThread clientSession, String msg) {
+        Map<String, Object> decodedMessage = MessageLibrary.decodeMessage(msg);
+        if (decodedMessage == null) {
             clientSession.authError("Incorrect request: " + msg);
             return;
         }
-        String login = arr[2];
-        String password = arr[3];
-        String nickname = authController.getNickname(login, password);
+        String nickname = authController.getNickname((String) (decodedMessage.get("login")), (String) (decodedMessage.get("password")));
         if (nickname == null) {
             clientSession.authDeny();
             return;
