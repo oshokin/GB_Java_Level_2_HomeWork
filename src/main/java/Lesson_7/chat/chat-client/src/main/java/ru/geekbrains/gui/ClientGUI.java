@@ -15,6 +15,7 @@ import java.io.PrintWriter;
 import java.net.Socket;
 import java.text.SimpleDateFormat;
 import java.util.Calendar;
+import java.util.Map;
 
 public class ClientGUI extends JFrame implements ActionListener, Thread.UncaughtExceptionHandler, MessageSocketThreadListener {
 
@@ -38,6 +39,7 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
     private final JList<String> listUsers = new JList<>();
     private SimpleDateFormat sdf = new SimpleDateFormat("dd.MM.yyyy HH:mm:ss");
     private MessageSocketThread socketThread;
+    private boolean isLoggedIn = false;
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(new Runnable() {
@@ -55,8 +57,7 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
         setSize(WIDTH, HEIGHT);
         setAlwaysOnTop(true);
 
-        listUsers.setListData(new String[]{"user1", "user2", "user3", "user4",
-                "user5", "user6", "user7", "user8", "user9", "user-with-too-long-name-in-this-chat"});
+        //listUsers.setListData();
         JScrollPane scrollPaneUsers = new JScrollPane(listUsers);
         JScrollPane scrollPaneChatArea = new JScrollPane(chatArea);
         scrollPaneUsers.setPreferredSize(new Dimension(100, 0));
@@ -80,8 +81,6 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
         add(panelTop, BorderLayout.NORTH);
         add(panelBottom, BorderLayout.SOUTH);
 
-        panelBottom.setVisible(false);
-
         cbAlwaysOnTop.addActionListener(this);
         buttonSend.addActionListener(this);
         messageField.addActionListener(this);
@@ -89,6 +88,7 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
         buttonDisconnect.addActionListener(this);
 
         setVisible(true);
+        controlVisibility();
     }
 
     @Override
@@ -129,20 +129,14 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
         if (msg.isEmpty()) {
             return;
         }
-        //23.06.2020 12:20:25 <Login>: сообщение
-        putMessageInChatArea(user, msg);
-        messageField.setText("");
-        messageField.grabFocus();
-        socketThread.sendMessage(msg);
+        socketThread.sendMessage(MessageLibrary.getCommonMessage(user, msg));
     }
 
-    /*
-     * Добавление новых сообщений в окно чата
-     */
-    public void putMessageInChatArea(String user, String msg) {
-        String messageToChat = String.format("%s <%s>: %s%n", sdf.format(Calendar.getInstance().getTime()), user, msg);
-        chatArea.append(messageToChat);
+    public void putMessageInChatArea(String user, String messageToChat) {
         putIntoFileHistory(user, messageToChat);
+        chatArea.append(messageToChat);
+        messageField.setText("");
+        messageField.grabFocus();
     }
 
     private void putIntoFileHistory(String user, String msg) {
@@ -159,23 +153,51 @@ public class ClientGUI extends JFrame implements ActionListener, Thread.Uncaught
 
     @Override
     public void onSocketReady() {
-        panelTop.setVisible(false);
-        panelBottom.setVisible(true);
         socketThread.sendMessage(MessageLibrary.getAuthRequestMessage(loginField.getText(), new String(passwordField.getPassword())));
     }
 
     @Override
     public void onSocketClosed() {
-        panelTop.setVisible(true);
-        panelBottom.setVisible(false);
+        isLoggedIn = false;
+        controlVisibility();
     }
 
+    private void controlVisibility() {
+        panelTop.setVisible(!isLoggedIn);
+        panelBottom.setVisible(isLoggedIn);
+        chatArea.setVisible(isLoggedIn);
+        listUsers.setVisible(isLoggedIn);
+    }
     /*
     * Получение сообщений от сервера
      */
     @Override
-    public void onMessageReceived(String msg) {
-        putMessageInChatArea("server", msg);
+    public void onMessageReceived(Socket socket, String msg) {
+        Map<String, Object> decodedMessage = MessageLibrary.decodeMessage(msg);
+        if (decodedMessage == null) {
+            showError("Incorrect server response: " + msg);
+            return;
+        }
+        Boolean success = (Boolean) (decodedMessage.get("success"));
+        String login. = loginField.getText();
+        String message = (String) (decodedMessage.get("message"));
+        if (success == Boolean.FALSE) {
+            showError(message);
+            return;
+        }
+        String messageType = (String) (decodedMessage.get("type"));
+        if (messageType.equals(MessageLibrary.AUTH_TYPE)) {
+            isLoggedIn = true;
+            controlVisibility();
+            putMessageInChatArea(login, message);
+        }
+        if (messageType.equals(MessageLibrary.COMMON_MESSAGE_TYPE)) {
+            if (!message.isEmpty()) {
+                String sender = (String) (decodedMessage.get("login"));
+                String messageToChat = String.format("%s <%s>: %s%n", sdf.format(Calendar.getInstance().getTime()), sender, message);
+                putMessageInChatArea(login, messageToChat);
+            }
+        }
     }
 
     @Override

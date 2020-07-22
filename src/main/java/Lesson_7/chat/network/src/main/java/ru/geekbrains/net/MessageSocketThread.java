@@ -28,7 +28,7 @@ public class MessageSocketThread extends Thread {
             listener.onSocketReady();
             while (!isInterrupted()) {
                 if (!isClosed) {
-                    listener.onMessageReceived(in.readUTF());
+                    listener.onMessageReceived(socket, in.readUTF());
                 }
             }
         } catch (IOException e) {

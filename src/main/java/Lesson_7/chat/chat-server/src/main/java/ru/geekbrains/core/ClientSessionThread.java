@@ -30,12 +30,12 @@ public class ClientSessionThread extends MessageSocketThread {
     }
 
     public void authDeny() {
-        sendMessage(MessageLibrary.getAuthDeniedMessage());
+        sendMessage(MessageLibrary.getAuthDeniedMessage("No se puede entrar"));
         close();
     }
 
     public void authError(String msg) {
-        sendMessage(MessageLibrary.getMsgFormatErrorMessage(msg));
+        sendMessage(MessageLibrary.getAuthDeniedMessage(msg));
         close();
     }
 
